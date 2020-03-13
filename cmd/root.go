@@ -35,7 +35,7 @@ var rootCmd = &cobra.Command{
 		get(1)
 		for {
 			time.Sleep(time.Second)
-			if int(comindex) == curindex {
+			if end {
 				fmt.Println("抓取完成")
 				return
 			}

@@ -6,7 +6,6 @@ import (
 	"os"
 	"runtime/debug"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -69,7 +68,6 @@ func getdetail(ds detail) {
 				saveimg(imgurl, filepath)
 			})
 		}
-		atomic.AddInt64(&comindex, 1)
 	})
 	err = c.Visit(link)
 	if err != nil {

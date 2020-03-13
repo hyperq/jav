@@ -24,12 +24,12 @@ var (
 	allmag       bool
 	nopic        bool
 	caption      bool
-	curpage      int   = 1
-	curindex     int   = 0
-	comindex     int64 = 0
-	baseurl            = "https://www.javbus.com/"
-	searchu            = "search/"
-	magneturl          = "ajax/uncledatoolsbyajax.php"
+	curpage      int = 1
+	curindex         = 0
+	end              = false
+	baseurl          = "https://www.javbus.com/"
+	searchu          = "search/"
+	magneturl        = "ajax/uncledatoolsbyajax.php"
 	gidregexp    *regexp.Regexp
 	ucregexp     *regexp.Regexp
 	imgregexp    *regexp.Regexp
@@ -65,7 +65,7 @@ func init() {
 	// will be global for your application.
 
 	rootCmd.PersistentFlags().IntVarP(&parallel, "parallel", "p", 2, "设置每秒抓取请求书")
-	rootCmd.PersistentFlags().IntVarP(&timeout, "timeout", "t", 30000, "自定义连接超时时间(毫秒)")
+	rootCmd.PersistentFlags().IntVarP(&timeout, "timeout", "t", 5000, "自定义连接超时时间(毫秒)")
 	rootCmd.PersistentFlags().IntVarP(&limit, "limit", "l", 0, "设置抓取影片的数量上限，0为抓取全部影片")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "magnets", "设置磁链和封面抓取结果的保存位置，默认为当前用户的主目录下的 magnets 文件夹")
 	rootCmd.PersistentFlags().StringVarP(&search, "search", "s", "", "搜索关键词，可只抓取搜索结果的磁链或封面")

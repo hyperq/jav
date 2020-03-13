@@ -46,6 +46,7 @@ func get(re int) {
 				re++
 				get(re)
 			} else {
+				end = true
 				return
 			}
 		}
