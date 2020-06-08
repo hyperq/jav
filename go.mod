@@ -1,4 +1,4 @@
-module jav
+module github.com/hyperq/jav
 
 go 1.13
 

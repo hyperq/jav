@@ -27,11 +27,15 @@ type meta struct {
 }
 
 func getdetail(ds detail) {
+
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Println(err)
 			debug.PrintStack()
 		}
+	}()
+	defer func() {
+		curindex++
 	}()
 	c, err := getrequest()
 	if err != nil {

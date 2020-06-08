@@ -15,7 +15,7 @@ limitations under the License.
 */
 package main
 
-import "jav/cmd"
+import "github.com/hyperq/jav/cmd"
 
 func main() {
 	cmd.Execute()
