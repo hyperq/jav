@@ -24,6 +24,7 @@ var (
 	allmag       bool
 	nopic        bool
 	caption      bool
+	mp4          bool
 	curpage      int = 1
 	curindex         = 0
 	end              = false
@@ -42,6 +43,7 @@ func init() {
 
 	//
 	var err error
+	// 初始化过滤规则
 	gidregexp, err = regexp.Compile(`var gid.*;`)
 	if err != nil {
 		fmt.Println(err)
@@ -58,12 +60,10 @@ func init() {
 	if err != nil {
 		fmt.Println(err)
 	}
-	//
+	// 随机种子
 	randg = rand.New(rand.NewSource(time.Now().UnixNano()))
-	// Here you will define your flags and configuration settings.
-	// Cobra supports persistent flags, which, if defined here,
-	// will be global for your application.
 
+	// 配置解析
 	rootCmd.PersistentFlags().IntVarP(&parallel, "parallel", "p", 2, "设置每秒抓取请求书")
 	rootCmd.PersistentFlags().IntVarP(&timeout, "timeout", "t", 30000, "自定义连接超时时间(毫秒)")
 	rootCmd.PersistentFlags().IntVarP(&limit, "limit", "l", 0, "设置抓取影片的数量上限，0为抓取全部影片")
@@ -72,12 +72,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&base, "base", "b", baseurl, "自定义抓取的起始页")
 	rootCmd.PersistentFlags().StringVarP(&proxy, "proxy", "x", "", "使用代理服务器, 例：-x http://127.0.0.1:8087")
 	rootCmd.PersistentFlags().BoolVarP(&nomag, "nomag", "n", false, "是否抓取尚无磁链的影片")
-	rootCmd.PersistentFlags().BoolVarP(&allmag, "allmag", "a", false, "是否抓取尚无磁链的影片")
+	rootCmd.PersistentFlags().BoolVarP(&allmag, "allmag", "a", false, "是否抓取影片的全部链接")
 	rootCmd.PersistentFlags().BoolVarP(&nopic, "nopic", "i", false, "禁用图片抓取")
 	rootCmd.PersistentFlags().BoolVarP(&caption, "caption", "c", false, "是否优先抓取有字幕的")
+	rootCmd.PersistentFlags().BoolVarP(&mp4, "mp4", "m", false, "是否优先抓取mp4")
 	rootCmd.PersistentFlags().IntVarP(&curpage, "page", "g", 1, "开始的页码")
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
+
 }
 
 // initConfig reads in config file and ENV variables if set.

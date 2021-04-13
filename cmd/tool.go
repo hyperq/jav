@@ -29,41 +29,54 @@ func size(s string) float64 {
 	s = strings.Replace(s, " ", "", -1)
 	s = strings.Replace(s, "    ", "", -1)
 	var modulus float64
-	if strings.Index(s, "G") > -1 {
+	if strings.Contains(s, "G") {
 		modulus = 1024
 	}
-	if strings.Index(s, "M") > -1 {
+	if strings.Contains(s, "M") {
 		modulus = 1
 	}
 	return numberi * modulus
 }
 
+// 获取对应的磁力链接
 func getmagnet(ms []magnet) (link string) {
 	var links []string
 	var maxsize int
-	for k := range ms {
+	var nms []magnet
+	if mp4 {
+		for k := range ms {
+			if strings.Contains(ms[k].link, ".mp4") {
+				nms = append(nms, ms[k])
+			}
+		}
+	} else {
+		nms = ms
+	}
+	// 先获取一个链接
+	for k := range nms {
 		if allmag {
-			links = append(links, ms[k].link)
+			links = append(links, nms[k].link)
 		} else {
-			if ms[k].size > maxsize {
-				maxsize = ms[k].size
+			if nms[k].size > maxsize {
+				maxsize = nms[k].size
 				if len(links) == 0 {
-					links = append(links, ms[k].link)
+					links = append(links, nms[k].link)
 				} else {
-					links[0] = ms[k].link
+					links[0] = nms[k].link
 				}
 			}
 		}
 	}
+	// 筛选出最大的带字幕的链接
 	if caption {
 		maxsize = 0
-		for k := range ms {
-			if ms[k].caption && ms[k].size > maxsize {
-				maxsize = ms[k].size
+		for k := range nms {
+			if nms[k].caption && nms[k].size > maxsize {
+				maxsize = nms[k].size
 				if len(links) == 0 {
-					links = append(links, ms[k].link)
+					links = append(links, nms[k].link)
 				} else {
-					links[0] = ms[k].link
+					links[0] = nms[k].link
 				}
 			}
 		}

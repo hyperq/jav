@@ -16,7 +16,6 @@ type magnet struct {
 	link    string
 	size    int
 	caption bool
-	hd      bool
 }
 
 type meta struct {
@@ -27,32 +26,37 @@ type meta struct {
 }
 
 func getdetail(ds detail) {
-
+	defer func() {
+		curindex++
+	}()
+	filepath := output + "/" + ds.number
+	if exist(filepath) {
+		return
+	}
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Println(err)
 			debug.PrintStack()
 		}
 	}()
-	defer func() {
-		curindex++
-	}()
+
 	c, err := getrequest()
 	if err != nil {
 		return
 	}
 	link, number := ds.link, ds.number
+
 	//var magnets []magnet
 	c.SetRequestTimeout(time.Duration(timeout * 1e6))
 
 	c.OnHTML("body", func(pe *colly.HTMLElement) {
-		filepath := output + "/" + number
+
 		err := os.MkdirAll(filepath, 0777)
 		if err != nil {
 			fmt.Println(err)
 		}
 		pe.ForEach("script:nth-of-type(3)", func(i int, e *colly.HTMLElement) {
-			if strings.Index(e.Text, "gid") > -1 {
+			if strings.Contains(e.Text, "gid") {
 				magnets := getmagnetlist(parsescript(e.Text), link)
 				//获取磁链
 				ms := getmagnet(magnets)
@@ -77,6 +81,14 @@ func getdetail(ds detail) {
 	if err != nil {
 		fmt.Println(err)
 	}
+}
+
+func exist(path string) bool {
+	_, err := os.Stat(path)
+	if err != nil {
+		return os.IsExist(err)
+	}
+	return true
 }
 
 func getmagnetlist(m meta, link string) (magnets []magnet) {
