@@ -140,6 +140,10 @@ All data stored in `~/.jav/`:
 
 > Unsupported terminals automatically fall back to text-only mode.
 
+## 🔗 Community
+
+- [LinuxDO](https://linux.do) — Tech community for open-source enthusiasts
+
 ## 📄 License
 
 MIT © [hyperq](https://github.com/hyperq)

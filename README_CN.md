@@ -140,6 +140,10 @@ jav --base https://www.javbus.com
 
 > 不支持图片的终端会自动切换到纯文本模式。
 
+## 🔗 社区
+
+- [LinuxDO](https://linux.do) — 开源技术爱好者社区
+
 ## 📄 协议
 
 MIT © [hyperq](https://github.com/hyperq)
