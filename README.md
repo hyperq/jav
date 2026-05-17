@@ -1,42 +1,86 @@
-# jav
+# JAV TUI
 
-Crawl javbus Magnet
+Terminal UI client for JavBus — search movies, browse actresses, manage magnets, with image preview support.
+
+![Rust](https://img.shields.io/badge/rust-2024-orange) ![License](https://img.shields.io/badge/license-MIT-blue)
+
+[中文文档](README_CN.md)
+
+## Features
+
+- **Movie Search** — search by keyword, number, or actress code
+- **Actress Browser** — grid view with avatar, search by name
+- **Image Preview** — Kitty graphics protocol (Ghostty/Kitty/WezTerm)
+- **Magnet Links** — smart sort (caption > HD > size), batch export
+- **Multi-select** — space to select, export all magnets to file
+- **History & Favorites** — SQLite persistence with cover cache
+- **115 Cloud** — QR login, direct download magnets to 115 cloud
+- **Configurable** — thumbnails, cover, sort preferences stored in SQLite
+- **Catppuccin Frappé** — beautiful color theme
 
 ## Install
 
 ```bash
-go get github.com/hyperq/jav
+cargo build --release
+cp target/release/jav ~/.local/bin/
 ```
 
 ## Usage
 
 ```bash
-➜ jav -h
---------------------------------------------------------------------------------------------------------------
-javbus spider written by go
+# basic
+jav
 
-Usage:
-  jav [flags]
+# with proxy
+jav --proxy socks5://127.0.0.1:1080
 
-Flags:
-  -a, --allmag          是否抓取影片的全部链接
-  -b, --base string     自定义抓取的起始页 (default "https://www.javbus.com/")
-  -c, --caption         是否优先抓取有字幕的
-  -h, --help            help for jav
-  -l, --limit int       设置抓取影片的数量上限，0为抓取全部影片
-  -m, --mp4             是否优先抓取mp4
-  -n, --nomag           是否抓取尚无磁链的影片
-  -i, --nopic           禁用图片抓取
-  -o, --output string   设置磁链和封面抓取结果的保存位置，默认为当前用户的主目录下的 magnets 文件夹 (default "magnets")
-  -g, --page int        开始的页码 (default 1)
-  -p, --parallel int    设置每秒抓取请求书 (default 2)
-  -x, --proxy string    使用代理服务器, 例：-x http://127.0.0.1:8087
-  -s, --search string   搜索关键词，可只抓取搜索结果的磁链或封面
-  -t, --timeout int     自定义连接超时时间(毫秒) (default 30000)
+# custom base url
+jav --base https://www.javbus.com
 ```
 
-因为 javbus 国内有限制,请使用科学上网工具
+## Keybindings
 
-```bash
-jav -x http://127.0.0.1:8087
-```
+| Key | Action |
+|-----|--------|
+| `f` | Search movies |
+| `F` | Search actresses |
+| `S` | Actress code direct (e.g. `okq`) |
+| `j/k` | Navigate up/down |
+| `h/l` | Navigate left/right (grid) |
+| `Enter` | Open detail |
+| `Tab` | Switch panel (list/detail) |
+| `n` | Load more (next page) |
+| `N` | Jump to page |
+| `Space` | Multi-select toggle |
+| `a` | Select all |
+| `e` | Export selected magnets |
+| `s` | Toggle favorite |
+| `g` | Grab best magnet |
+| `d` | Download to 115 cloud |
+| `D` | Batch download selected to 115 |
+| `L` | 115 QR login |
+| `c` | Settings |
+| `~` | Toggle log panel |
+| `q` | Quit |
+| Scroll | Mouse scroll support |
+| Click | Click list item / tabs |
+
+## Data
+
+All data stored in `~/.jav/`:
+
+| File | Content |
+|------|---------|
+| `data.db` | SQLite: history, favorites, config, magnets cache |
+| `cache/` | Image cache (thumbnails, covers, avatars) |
+| `115_cookie.json` | 115 cloud login cookie |
+
+## Requirements
+
+- Rust 1.70+
+- Terminal with Kitty graphics protocol (Ghostty, Kitty, WezTerm) for image display
+- Falls back to text-only mode on unsupported terminals
+
+## License
+
+MIT

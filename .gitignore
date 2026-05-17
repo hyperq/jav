@@ -1,18 +1,20 @@
-# Created by .ignore support plugin (hsz.mobi)
-### Go template
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
+# Build
+/target/
+*.swp
+*.swo
 
-# Test binary, built with `go test -c`
-*.test
+# IDE
+.idea/
+.vscode/
+*.iml
 
-# Output of the go coverage tool, specifically when used with LiteIDE
-*.out
+# OS
+.DS_Store
+Thumbs.db
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Runtime
+/magnets_export.txt
+/tmp/
 
+# Debug
+*.log
