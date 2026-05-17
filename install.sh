@@ -37,21 +37,25 @@ fi
 echo "Installing ${BINARY} ${VERSION} (${ARCH}-${OS})..."
 
 URL="https://github.com/${REPO}/releases/download/${VERSION}/${TARGET}.tar.gz"
-TMPDIR=$(mktemp -d)
-trap "rm -rf $TMPDIR" EXIT
+TMP=$(mktemp -d)
+trap "rm -rf $TMP" EXIT
 
 # download and extract
-curl -sL "$URL" -o "$TMPDIR/${TARGET}.tar.gz"
-tar -xzf "$TMPDIR/${TARGET}.tar.gz" -C "$TMPDIR"
+curl -fSL "$URL" -o "$TMP/${TARGET}.tar.gz"
+tar -xzf "$TMP/${TARGET}.tar.gz" -C "$TMP"
 
-# install
-if [ -w "$INSTALL_DIR" ]; then
-  mv "$TMPDIR/${BINARY}" "$INSTALL_DIR/${BINARY}"
+# ensure install dir exists and install
+if [ -w "$INSTALL_DIR" ] 2>/dev/null; then
+  mkdir -p "$INSTALL_DIR"
+  mv "$TMP/${BINARY}" "$INSTALL_DIR/${BINARY}"
 else
-  sudo mv "$TMPDIR/${BINARY}" "$INSTALL_DIR/${BINARY}"
+  sudo mkdir -p "$INSTALL_DIR"
+  sudo mv "$TMP/${BINARY}" "$INSTALL_DIR/${BINARY}"
+  sudo chmod +x "$INSTALL_DIR/${BINARY}"
 fi
 
-chmod +x "$INSTALL_DIR/${BINARY}"
+chmod +x "$INSTALL_DIR/${BINARY}" 2>/dev/null || true
 
-echo "Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
-echo "Run 'jav --help' to get started"
+echo ""
+echo "✅ Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
+echo "   Run 'jav --help' to get started"
