@@ -25,6 +25,12 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             name: jav-aarch64-unknown-linux-gnu
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: jav-x86_64-pc-windows-msvc
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            name: jav-aarch64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -40,6 +46,7 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build
+        shell: bash
         run: |
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
             cross build --release --target ${{ matrix.target }}
@@ -47,12 +54,20 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
 
-      - name: Package
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           tar -czf ../../../${{ matrix.name }}.tar.gz jav
           cd ../../..
           shasum -a 256 ${{ matrix.name }}.tar.gz > ${{ matrix.name }}.tar.gz.sha256
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/jav.exe" -DestinationPath "${{ matrix.name }}.zip"
+          (Get-FileHash "${{ matrix.name }}.zip" -Algorithm SHA256).Hash.ToLower() + "  ${{ matrix.name }}.zip" | Out-File "${{ matrix.name }}.zip.sha256"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -61,6 +76,8 @@ jobs:
           path: |
             ${{ matrix.name }}.tar.gz
             ${{ matrix.name }}.tar.gz.sha256
+            ${{ matrix.name }}.zip
+            ${{ matrix.name }}.zip.sha256
 
   release:
     needs: build
@@ -78,5 +95,6 @@ jobs:
         with:
           files: |
             *.tar.gz
+            *.zip
             *.sha256
           generate_release_notes: true

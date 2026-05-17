@@ -7,7 +7,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/rust-stable-orange?style=flat-square&logo=rust" />
   <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" />
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-brightgreen?style=flat-square" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-brightgreen?style=flat-square" />
   <img src="https://img.shields.io/badge/theme-Catppuccin%20Frappé-lavender?style=flat-square" />
 </p>
 
@@ -33,10 +33,16 @@
 
 ## 🚀 安装
 
-**一键安装（macOS / Linux）：**
+**macOS / Linux：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hyperq/jav/master/install.sh | sh
+```
+
+**Windows (PowerShell)：**
+
+```powershell
+irm https://raw.githubusercontent.com/hyperq/jav/master/install.ps1 | iex
 ```
 
 **从源码编译：**
