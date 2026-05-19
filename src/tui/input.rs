@@ -2,6 +2,24 @@ use crossterm::event::KeyCode;
 use super::app::{App, Panel, Tab, SearchMode};
 
 pub fn handle_key(app: &mut App, key: KeyCode) -> bool {
+    // player picker popup
+    if app.show_player_picker {
+        match key {
+            KeyCode::Esc => { app.show_player_picker = false; }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if app.player_cursor + 1 < app.player_options.len() {
+                    app.player_cursor += 1;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                app.player_cursor = app.player_cursor.saturating_sub(1);
+            }
+            KeyCode::Enter => { app.confirm_player_selection(); }
+            _ => {}
+        }
+        return false;
+    }
+
     // config popup
     if app.show_config {
         match key {
@@ -11,6 +29,19 @@ pub fn handle_key(app: &mut App, key: KeyCode) -> bool {
             KeyCode::Char('4') => { app.config.prefer_hd = !app.config.prefer_hd; app.config.save(&app.store); }
             KeyCode::Char('5') => { app.config.sort_by_size = !app.config.sort_by_size; app.config.save(&app.store); }
             KeyCode::Char('6') => { app.clear_image_cache(); }
+            KeyCode::Char('7') => {
+                let opts = &app.player_options;
+                if opts.is_empty() { return false; }
+                let current = app.config.player.as_str();
+                let idx = opts.iter().position(|&(v, _)| v == current).map(|i| (i + 1) % opts.len()).unwrap_or(0);
+                app.config.player = opts[idx].0.to_string();
+                app.config.save(&app.store);
+            }
+            KeyCode::Char('8') => {
+                app.config.theme_mode = app.config.theme_mode.toggle();
+                app.theme = super::theme::Theme::from_mode_with_luma(app.config.theme_mode, app.detected_luma);
+                app.config.save(&app.store);
+            }
             KeyCode::Esc | KeyCode::Char('c') => { app.show_config = false; }
             _ => {}
         }
@@ -183,6 +214,7 @@ pub fn handle_key(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('d') => { app.download_detail_to_115(); }
         KeyCode::Char('D') => { app.download_selected_to_115(); }
         KeyCode::Char('L') => { app.start_qr_login(); }
+        KeyCode::Char('P') => { app.play_from_115(); }
 
         // config popup
         KeyCode::Char('c') => { app.show_config = !app.show_config; }
@@ -245,11 +277,6 @@ pub fn handle_click(app: &mut App, col: u16, row: u16) {
                 app.tab = tab;
                 if old != tab {
                     app.panel = Panel::Left;
-                    match tab {
-                        Tab::History => app.load_history(),
-                        Tab::Favorites => app.load_favorites(),
-                        _ => {}
-                    }
                 }
                 return;
             }
@@ -291,10 +318,3 @@ fn area_height_approx(_click_row: u16) -> u16 {
     h.saturating_sub(10) // approximate list area height (minus borders, info, logs, status)
 }
 
-fn load_tab_data(app: &mut App) {
-    match app.tab {
-        Tab::History => app.load_history(),
-        Tab::Favorites => app.load_favorites(),
-        Tab::Movies | Tab::Actresses => {} // data already separate, no action needed
-    }
-}

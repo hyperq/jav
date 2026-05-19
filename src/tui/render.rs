@@ -3,7 +3,7 @@ use ratatui::widgets::*;
 use ratatui_image::{Resize, StatefulImage};
 
 use super::app::{App, Panel, Tab, SearchMode};
-use super::theme as t;
+use super::theme::Theme;
 
 const CARD_HEIGHT_IMG: u16 = 10;
 const CARD_HEIGHT_TEXT: u16 = 5;
@@ -13,7 +13,12 @@ fn card_height(show_img: bool) -> u16 {
     if show_img { CARD_HEIGHT_IMG } else { CARD_HEIGHT_TEXT }
 }
 
+fn clear_popup(f: &mut Frame, popup: Rect, _area: Rect) {
+    f.render_widget(Clear, popup);
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
+    let t = &app.theme.clone();
     let area = f.area();
 
     let mut v_constraints = vec![Constraint::Min(10), Constraint::Length(1)];
@@ -44,10 +49,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_config_popup(f, app, area);
     }
     if let Some((done, total)) = app.export_progress {
-        draw_progress_popup(f, area, done, total, "📦 导出磁力链接");
+        draw_progress_popup(f, t, area, done, total, "📦 导出磁力链接");
     }
     if let Some((done, total)) = app.cloud_dl_progress {
-        draw_progress_popup(f, area, done, total, "☁️ 115 云下载");
+        draw_progress_popup(f, t, area, done, total, "☁️ 115 云下载");
     }
     if app.show_qr_login {
         draw_qr_login_popup(f, app, area);
@@ -58,51 +63,56 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.show_page_jump {
         draw_page_jump_popup(f, app, area);
     }
+    if app.show_player_picker {
+        draw_player_picker(f, app, area);
+    }
     // toast notification (auto-dismiss after 3s)
+    // always clear the toast row to prevent ghost remnants from previous toasts
+    let toast_row = Rect::new(0, area.height / 2 - 1, area.width, 3);
     if let Some((ref msg, instant)) = app.toast {
         if instant.elapsed() < std::time::Duration::from_secs(3) {
-            let w = (msg.len() as u16 + 4).min(area.width.saturating_sub(4));
-            let popup = Rect::new((area.width - w) / 2, area.height / 2 - 1, w, 3);
-            f.render_widget(Clear, popup);
+            let text_w: u16 = msg.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum();
+            let w = (text_w + 4).max(16).min(area.width.saturating_sub(4));
+            let popup = Rect::new((area.width.saturating_sub(w)) / 2, toast_row.y, w, 3);
+            f.render_widget(Clear, toast_row);
             let block = Block::bordered()
-                .border_style(Style::default().fg(t::PEACH))
-                .style(Style::default().bg(t::SURFACE0));
+                .border_style(Style::default().fg(t.peach))
+                .style(Style::default().bg(t.base));
             let inner = block.inner(popup);
             f.render_widget(block, popup);
-            f.render_widget(Paragraph::new(msg.as_str()).fg(t::TEXT).alignment(Alignment::Center), inner);
-        } else {
-            // will be cleared next frame
+            f.render_widget(Paragraph::new(msg.as_str()).fg(t.text).alignment(Alignment::Center), inner);
         }
     }
 }
 
 fn draw_page_jump_popup(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme.clone();
     let w = 35u16.min(area.width.saturating_sub(4));
     let h = 5u16;
     let popup = Rect::new((area.width - w) / 2, (area.height - h) / 2, w, h);
-    f.render_widget(Clear, popup);
+    clear_popup(f, popup, area);
     let block = Block::bordered()
         .title(" 跳转页码 (Enter确认) ")
-        .border_style(Style::default().fg(t::SAPPHIRE))
-        .style(Style::default().bg(t::BASE));
+        .border_style(Style::default().fg(t.sapphire))
+        .style(Style::default().bg(t.base));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
-    f.render_widget(Paragraph::new(format!(" 当前第{}页，输入页码：", app.page)).fg(t::OVERLAY0), rows[0]);
-    f.render_widget(Paragraph::new(format!(" {}▌", app.page_jump_input)).fg(t::TEXT).bold(), rows[1]);
+    f.render_widget(Paragraph::new(format!(" 当前第{}页，输入页码：", app.page)).fg(t.overlay0), rows[0]);
+    f.render_widget(Paragraph::new(format!(" {}▌", app.page_jump_input)).fg(t.text).bold(), rows[1]);
 }
 
-fn draw_progress_popup(f: &mut Frame, area: Rect, done: usize, total: usize, title: &str) {
+fn draw_progress_popup(f: &mut Frame, t: &Theme, area: Rect, done: usize, total: usize, title: &str) {
     let w = 40u16.min(area.width.saturating_sub(4));
     let h = 5u16;
     let popup = Rect::new((area.width - w) / 2, (area.height - h) / 2, w, h);
 
     let block = Block::bordered()
         .title(format!(" {title} "))
-        .border_style(Style::default().fg(t::PEACH))
-        .style(Style::default().bg(t::BASE));
+        .border_style(Style::default().fg(t.peach))
+        .style(Style::default().bg(t.base));
     let inner = block.inner(popup);
-    f.render_widget(Clear, popup);
+    clear_popup(f, popup, area);
     f.render_widget(block, popup);
 
     let pct = if total > 0 { done * 100 / total } else { 0 };
@@ -111,8 +121,8 @@ fn draw_progress_popup(f: &mut Frame, area: Rect, done: usize, total: usize, tit
     let bar: String = "█".repeat(filled) + &"░".repeat(bar_width - filled);
 
     let lines = vec![
-        Line::styled(format!(" {done}/{total} ({pct}%)"), Style::default().fg(t::TEXT)),
-        Line::styled(format!(" {bar}"), Style::default().fg(t::PEACH)),
+        Line::styled(format!(" {done}/{total} ({pct}%)"), Style::default().fg(t.text)),
+        Line::styled(format!(" {bar}"), Style::default().fg(t.peach)),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -120,10 +130,11 @@ fn draw_progress_popup(f: &mut Frame, area: Rect, done: usize, total: usize, tit
 // --- Left Panel ---
 
 fn draw_left(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = &app.theme.clone();
     let border_style = if app.panel == Panel::Left {
-        Style::default().fg(t::MAUVE)
+        Style::default().fg(t.mauve)
     } else {
-        Style::default().fg(t::OVERLAY0)
+        Style::default().fg(t.overlay0)
     };
 
     // tabs on the border (like right panel title)
@@ -144,12 +155,13 @@ fn draw_left(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_movie_list(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = &app.theme.clone();
     let movies = app.current_movies().to_vec();
     let cur = app.cursor();
 
     if app.loading && movies.is_empty() {
         f.render_widget(
-            Paragraph::new("⏳ 加载中...").fg(t::YELLOW).alignment(Alignment::Center),
+            Paragraph::new("⏳ 加载中...").fg(t.yellow).alignment(Alignment::Center),
             Rect::new(area.x, area.y + area.height / 2, area.width, 1),
         );
         return;
@@ -160,7 +172,7 @@ fn draw_movie_list(f: &mut Frame, app: &mut App, area: Rect) {
             Tab::Favorites => "💫 暂无收藏 (列表页按 s 收藏)",
             _ => "按 f 搜索影片 | F 搜索女优 | S 女优代号直达",
         };
-        f.render_widget(Paragraph::new(hint).fg(t::OVERLAY0).alignment(Alignment::Center),
+        f.render_widget(Paragraph::new(hint).fg(t.overlay0).alignment(Alignment::Center),
             Rect::new(area.x, area.y + area.height / 2, area.width, 1));
         return;
     }
@@ -176,27 +188,27 @@ fn draw_movie_list(f: &mut Frame, app: &mut App, area: Rect) {
             _ => &String::new(),
         };
         if !info.is_empty() {
-            spans.push(Span::styled(format!(" {info} "), Style::default().fg(t::SAPPHIRE)));
-            spans.push(Span::styled("│", Style::default().fg(t::SURFACE2)));
+            spans.push(Span::styled(format!(" {info} "), Style::default().fg(t.sapphire)));
+            spans.push(Span::styled("│", Style::default().fg(t.surface2)));
         }
-        spans.push(Span::styled(format!(" {}条", movies.len()), Style::default().fg(t::TEXT)));
-        spans.push(Span::styled(format!(" #{}", cur + 1), Style::default().fg(t::PEACH)));
+        spans.push(Span::styled(format!(" {}条", movies.len()), Style::default().fg(t.text)));
+        spans.push(Span::styled(format!(" #{}", cur + 1), Style::default().fg(t.peach)));
         if app.tab == Tab::Movies {
-            spans.push(Span::styled(format!(" P{}", app.page), Style::default().fg(t::OVERLAY0)));
+            spans.push(Span::styled(format!(" P{}", app.page), Style::default().fg(t.overlay0)));
             if app.has_next {
-                spans.push(Span::styled(" │ n:更多 ▼", Style::default().fg(t::OVERLAY0)));
+                spans.push(Span::styled(" │ n:更多 ▼", Style::default().fg(t.overlay0)));
             }
         }
-        if app.loading { spans.push(Span::styled(" ⏳", Style::default().fg(t::YELLOW))); }
+        if app.loading { spans.push(Span::styled(" ⏳", Style::default().fg(t.yellow))); }
         if let Some((done, total)) = app.export_progress {
             let pct = if total > 0 { done * 100 / total } else { 0 };
-            spans.push(Span::styled(format!(" │ 📦{done}/{total}({pct}%)"), Style::default().fg(t::PEACH)));
+            spans.push(Span::styled(format!(" │ 📦{done}/{total}({pct}%)"), Style::default().fg(t.peach)));
         }
         let sel = app.selected_numbers.len();
         if sel > 0 {
-            spans.push(Span::styled(format!(" │ ✅{sel}"), Style::default().fg(t::GREEN)));
+            spans.push(Span::styled(format!(" │ ✅{sel}"), Style::default().fg(t.green)));
         }
-        f.render_widget(Paragraph::new(Line::from(spans)).bg(t::MANTLE), split[0]);
+        f.render_widget(Paragraph::new(Line::from(spans)).bg(t.mantle), split[0]);
     }
     let area = split[1];
 
@@ -245,8 +257,9 @@ fn draw_movie_list(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_movie_card(f: &mut Frame, app: &mut App, movie: &crate::scraper::Movie, area: Rect, cursor_on: bool, multi_selected: bool) {
+    let t = &app.theme.clone();
     if cursor_on {
-        f.render_widget(Block::default().style(Style::default().bg(t::SURFACE0)), area);
+        f.render_widget(Block::default().style(Style::default().bg(t.surface0)), area);
     }
 
     let thumb_w = if app.config.show_thumbnails { THUMB_WIDTH } else { 0 };
@@ -264,7 +277,7 @@ fn draw_movie_card(f: &mut Frame, app: &mut App, movie: &crate::scraper::Movie, 
             f.render_stateful_widget(img, thumb_rect, proto);
         } else {
             f.render_widget(
-                Paragraph::new("📷").fg(t::OVERLAY0).alignment(Alignment::Center),
+                Paragraph::new("📷").fg(t.overlay0).alignment(Alignment::Center),
                 Rect::new(thumb_rect.x, thumb_rect.y + thumb_rect.height / 2, thumb_rect.width, 1),
             );
         }
@@ -292,7 +305,7 @@ fn draw_movie_card(f: &mut Frame, app: &mut App, movie: &crate::scraper::Movie, 
 
     // title
     let cursor_mark = " ";
-    let title_style = if cursor_on { Style::default().fg(t::MAUVE).bold() } else { Style::default().fg(t::TEXT) };
+    let title_style = if cursor_on { Style::default().fg(t.mauve).bold() } else { Style::default().fg(t.text) };
     let title_lines = info_chunks[0].height.max(1) as usize;
     let avail_w = info_area.width as usize;
     let max_title_chars = avail_w.saturating_sub(2) * title_lines;
@@ -304,8 +317,8 @@ fn draw_movie_card(f: &mut Frame, app: &mut App, movie: &crate::scraper::Movie, 
 
     // tags on separate row (both modes)
     let tag_spans: Vec<Span> = real_tags.iter().map(|tag| {
-        let style = if tag.contains("高清") { Style::default().fg(t::GREEN).bold() }
-                    else { Style::default().fg(t::RED).bold() };
+        let style = if tag.contains("高清") { Style::default().fg(t.green).bold() }
+                    else { Style::default().fg(t.red).bold() };
         Span::styled(format!("[{tag}] "), style)
     }).collect();
     if !tag_spans.is_empty() {
@@ -318,26 +331,27 @@ fn draw_movie_card(f: &mut Frame, app: &mut App, movie: &crate::scraper::Movie, 
     let date_str = if movie.date.is_empty() { "" } else { &movie.date };
 
     let mut num_spans: Vec<Span> = Vec::new();
-    if !select_icon.is_empty() { num_spans.push(Span::styled(select_icon, Style::default().fg(t::GREEN))); }
-    if !fav_icon.is_empty() { num_spans.push(Span::styled(fav_icon, Style::default().fg(t::YELLOW))); }
-    num_spans.push(Span::styled(format!(" {}", movie.number), Style::default().fg(t::OVERLAY0)));
+    if !select_icon.is_empty() { num_spans.push(Span::styled(select_icon, Style::default().fg(t.green))); }
+    if !fav_icon.is_empty() { num_spans.push(Span::styled(fav_icon, Style::default().fg(t.yellow))); }
+    num_spans.push(Span::styled(format!(" {}", movie.number), Style::default().fg(t.overlay0)));
     if !date_str.is_empty() {
-        num_spans.push(Span::styled(format!(" / {date_str}"), Style::default().fg(t::OVERLAY0)));
+        num_spans.push(Span::styled(format!(" / {date_str}"), Style::default().fg(t.overlay0)));
     }
     f.render_widget(Paragraph::new(Line::from(num_spans)), info_chunks[2]);
 }
 
 fn draw_actress_list(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = &app.theme.clone();
     if app.loading && app.actresses.is_empty() {
         f.render_widget(
-            Paragraph::new("⏳ 加载中...").fg(t::YELLOW).alignment(Alignment::Center),
+            Paragraph::new("⏳ 加载中...").fg(t.yellow).alignment(Alignment::Center),
             Rect::new(area.x, area.y + area.height / 2, area.width, 1),
         );
         return;
     }
     if app.actresses.is_empty() {
         f.render_widget(
-            Paragraph::new("按 F 搜索女优 | S 输入女优代号直达").fg(t::OVERLAY0).alignment(Alignment::Center),
+            Paragraph::new("按 F 搜索女优 | S 输入女优代号直达").fg(t.overlay0).alignment(Alignment::Center),
             Rect::new(area.x, area.y + area.height / 2, area.width, 1),
         );
         return;
@@ -381,7 +395,7 @@ fn draw_actress_list(f: &mut Frame, app: &mut App, area: Rect) {
         let selected = *idx == app.cursor() && app.panel == Panel::Left;
 
         if selected {
-            f.render_widget(Block::default().style(Style::default().bg(t::SURFACE0)), cell);
+            f.render_widget(Block::default().style(Style::default().bg(t.surface0)), cell);
         }
 
         // avatar area (centered square)
@@ -397,18 +411,18 @@ fn draw_actress_list(f: &mut Frame, app: &mut App, area: Rect) {
             f.render_stateful_widget(img, avatar_rect, proto);
         } else {
             f.render_widget(
-                Paragraph::new("👩").fg(t::OVERLAY0).alignment(Alignment::Center),
+                Paragraph::new("👩").fg(t.overlay0).alignment(Alignment::Center),
                 Rect::new(x, y + avatar_h / 2, cell_w, 1),
             );
         }
 
         // name + code (bottom, centered)
-        let name_style = if selected { Style::default().fg(t::MAUVE).bold() } else { Style::default().fg(t::TEXT) };
+        let name_style = if selected { Style::default().fg(t.mauve).bold() } else { Style::default().fg(t.text) };
         let name_area = Rect::new(x, y + avatar_h, cell_w, 2);
         let name = truncate_str(&actress.name, cell_w as usize - 2);
         let lines = vec![
             Line::styled(name, name_style),
-            Line::styled(actress.code.clone(), Style::default().fg(t::OVERLAY0)),
+            Line::styled(actress.code.clone(), Style::default().fg(t.overlay0)),
         ];
         f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), name_area);
     }
@@ -417,10 +431,11 @@ fn draw_actress_list(f: &mut Frame, app: &mut App, area: Rect) {
 // --- Right Panel ---
 
 fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
+    let t = &app.theme.clone();
     let border_style = if app.panel == Panel::Right {
-        Style::default().fg(t::MAUVE)
+        Style::default().fg(t.mauve)
     } else {
-        Style::default().fg(t::OVERLAY0)
+        Style::default().fg(t.overlay0)
     };
 
     let title = app.selected_movie.as_ref()
@@ -433,7 +448,7 @@ fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
 
     if app.selected_movie.is_none() {
         f.render_widget(
-            Paragraph::new("👈 选择影片查看详情").fg(t::OVERLAY0).alignment(Alignment::Center),
+            Paragraph::new("👈 选择影片查看详情").fg(t.overlay0).alignment(Alignment::Center),
             Rect::new(inner.x, inner.y + inner.height / 2, inner.width, 1),
         );
         return;
@@ -461,7 +476,7 @@ fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
             f.render_stateful_widget(img, content_area[0], proto);
         } else {
             f.render_widget(
-                Paragraph::new("⏳ 加载封面...").fg(t::OVERLAY0).alignment(Alignment::Center),
+                Paragraph::new("⏳ 加载封面...").fg(t.overlay0).alignment(Alignment::Center),
                 Rect::new(content_area[0].x, content_area[0].y + content_area[0].height / 2, content_area[0].width, 1),
             );
         }
@@ -474,13 +489,13 @@ fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
     if let Some(detail) = &app.movie_detail {
         let genres_str = detail.genres.join(", ");
         let actresses_str = detail.actresses.iter().map(|a| a.name.as_str()).collect::<Vec<_>>().join(", ");
-        lines.push(Line::styled(format!(" 📅 {} | ⏱ {} | 🏭 {}", detail.date, detail.duration, detail.maker), Style::default().fg(t::TEXT)));
-        lines.push(Line::styled(format!(" 📦 {}", detail.publisher), Style::default().fg(t::OVERLAY0)));
+        lines.push(Line::styled(format!(" 📅 {} | ⏱ {} | 🏭 {}", detail.date, detail.duration, detail.maker), Style::default().fg(t.text)));
+        lines.push(Line::styled(format!(" 📦 {}", detail.publisher), Style::default().fg(t.overlay0)));
         // genres & actresses: wrap to multiple lines
         let line_w = w.saturating_sub(5);
         for (prefix, text, color) in [
-            (" 🏷  ", &genres_str, t::GREEN),
-            (" 👩 ", &actresses_str, t::SAPPHIRE),
+            (" 🏷  ", &genres_str, t.green),
+            (" 👩 ", &actresses_str, t.sapphire),
         ] {
             let wrapped = wrap_text(text, line_w);
             for (i, chunk) in wrapped.iter().enumerate() {
@@ -489,7 +504,7 @@ fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
             }
         }
     } else {
-        lines.push(Line::styled(" ⏳ 加载详情...", Style::default().fg(t::OVERLAY0)));
+        lines.push(Line::styled(" ⏳ 加载详情...", Style::default().fg(t.overlay0)));
     }
 
     lines.push(Line::raw(""));
@@ -510,20 +525,20 @@ fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
             })
     });
 
-    lines.push(Line::styled(format!(" 🧲 磁力链接 ({}) | g:获取最佳", app.magnets.len()), Style::default().fg(t::YELLOW)));
+    lines.push(Line::styled(format!(" 🧲 磁力链接 ({}) | g:获取最佳", app.magnets.len()), Style::default().fg(t.yellow)));
     if sorted_mags.is_empty() {
-        lines.push(Line::styled(" ⏳ 加载磁链中...", Style::default().fg(t::OVERLAY0)));
+        lines.push(Line::styled(" ⏳ 加载磁链中...", Style::default().fg(t.overlay0)));
     } else {
         for m in &sorted_mags {
             let badge = if m.caption { "✅字幕 " } else { "" };
             let hd = if m.size.contains("HD") { "🎬HD " } else { "" };
             lines.push(Line::styled(
                 format!("  {badge}{hd}[{}]", m.size),
-                Style::default().fg(t::SAPPHIRE),
+                Style::default().fg(t.sapphire),
             ));
             lines.push(Line::styled(
                 format!("   {}", truncate_str(&m.link, w.saturating_sub(4))),
-                Style::default().fg(t::BLUE),
+                Style::default().fg(t.blue),
             ));
         }
     }
@@ -537,7 +552,8 @@ fn draw_right(f: &mut Frame, app: &mut App, area: Rect) {
 // --- Bottom panels ---
 
 fn draw_logs(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::bordered().title("📝 日志 (~隐藏)").border_style(Style::default().fg(t::YELLOW));
+    let t = &app.theme.clone();
+    let block = Block::bordered().title("📝 日志 (~隐藏)").border_style(Style::default().fg(t.yellow));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -548,52 +564,53 @@ fn draw_logs(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme.clone();
     let sel_count = app.selected_numbers.len();
     let sel_info = if sel_count > 0 { format!(" | 已选{sel_count}条") } else { String::new() };
 
     let keys: Vec<Span> = vec![
-        Span::styled(" f", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled(" f", Style::default().fg(t.sapphire).bold()),
         Span::raw(":搜索 "),
-        Span::styled("F", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("F", Style::default().fg(t.sapphire).bold()),
         Span::raw(":女优 "),
-        Span::styled("S", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("S", Style::default().fg(t.sapphire).bold()),
         Span::raw(":代号 "),
-        Span::styled("空格", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("空格", Style::default().fg(t.sapphire).bold()),
         Span::raw(":选择 "),
-        Span::styled("a", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("a", Style::default().fg(t.sapphire).bold()),
         Span::raw(":全选 "),
-        Span::styled("e", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("e", Style::default().fg(t.sapphire).bold()),
         Span::raw(":导出 "),
-        Span::styled("s", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("s", Style::default().fg(t.sapphire).bold()),
         Span::raw(":收藏 "),
-        Span::styled("g", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("g", Style::default().fg(t.sapphire).bold()),
         Span::raw(":磁链 "),
-        Span::styled("n", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("n", Style::default().fg(t.sapphire).bold()),
         Span::raw(":更多 "),
-        Span::styled("d", Style::default().fg(t::TEAL).bold()),
+        Span::styled("d", Style::default().fg(t.teal).bold()),
         Span::raw(":115↓ "),
-        Span::styled("D", Style::default().fg(t::TEAL).bold()),
+        Span::styled("D", Style::default().fg(t.teal).bold()),
         Span::raw(":115批量↓ "),
-        Span::styled("L", Style::default().fg(t::TEAL).bold()),
+        Span::styled("L", Style::default().fg(t.teal).bold()),
         Span::raw(":115登录 "),
-        Span::styled("c", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("c", Style::default().fg(t.sapphire).bold()),
         Span::raw(":设置 "),
-        Span::styled("Tab", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("Tab", Style::default().fg(t.sapphire).bold()),
         Span::raw(":面板 "),
-        Span::styled("q", Style::default().fg(t::SAPPHIRE).bold()),
+        Span::styled("q", Style::default().fg(t.sapphire).bold()),
         Span::raw(":退出"),
-        Span::styled(&sel_info, Style::default().fg(t::YELLOW)),
+        Span::styled(&sel_info, Style::default().fg(t.yellow)),
         if let Some(ref q) = app.cloud115_quota {
-            Span::styled(format!(" │ ☁️{}/{}", q.quota, q.total), Style::default().fg(t::GREEN))
+            Span::styled(format!(" │ ☁️{}/{}", q.quota, q.total), Style::default().fg(t.green))
         } else if app.cloud115.is_some() {
-            Span::styled(" │ ☁️115", Style::default().fg(t::GREEN))
+            Span::styled(" │ ☁️115", Style::default().fg(t.green))
         } else {
-            Span::styled(" │ 115未登录", Style::default().fg(t::OVERLAY0))
+            Span::styled(" │ 115未登录", Style::default().fg(t.overlay0))
         },
     ];
 
     f.render_widget(
-        Paragraph::new(Line::from(keys)).style(Style::default().bg(t::CRUST)),
+        Paragraph::new(Line::from(keys)).style(Style::default().bg(t.crust)),
         area,
     );
 }
@@ -601,6 +618,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
 // --- Search popup ---
 
 fn draw_search_popup(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme.clone();
     let mode_str = match app.search_mode {
         SearchMode::Movie => "🔍 搜索影片",
         SearchMode::Actress => "👩 搜索女优",
@@ -613,16 +631,14 @@ fn draw_search_popup(f: &mut Frame, app: &App, area: Rect) {
     let h = 7u16;
     let popup = Rect::new((area.width.saturating_sub(w)) / 2, (area.height.saturating_sub(h)) / 2, w, h);
 
-    // clear a slightly wider area to prevent artifacts from emoji width mismatch
-    let clear_rect = Rect::new(popup.x.saturating_sub(1), popup.y, popup.width + 2, popup.height);
-    f.render_widget(Clear, clear_rect);
+    clear_popup(f, popup, area);
 
     let block = Block::bordered()
         .title(title)
-        .border_style(Style::default().fg(t::MAUVE))
-        .style(Style::default().bg(t::MANTLE));
+        .border_style(Style::default().fg(t.mauve))
+        .style(Style::default().bg(t.mantle));
     let inner = block.inner(popup);
-    f.render_widget(block, clear_rect);
+    f.render_widget(block, popup);
 
     let rows = Layout::vertical([
         Constraint::Length(1),
@@ -635,14 +651,14 @@ fn draw_search_popup(f: &mut Frame, app: &App, area: Rect) {
         SearchMode::Actress => "输入女优名：",
         SearchMode::StarCode => "输入女优代号 (如 okq)：",
     };
-    f.render_widget(Paragraph::new(hint).fg(t::OVERLAY0), rows[0]);
-    f.render_widget(Paragraph::new(format!(" {}▌", app.search_input)).fg(t::TEXT).bold(), rows[1]);
+    f.render_widget(Paragraph::new(hint).fg(t.overlay0), rows[0]);
+    f.render_widget(Paragraph::new(format!(" {}▌", app.search_input)).fg(t.text).bold(), rows[1]);
 
     if matches!(app.search_mode, SearchMode::Movie | SearchMode::Actress) {
         let (cs, us) = if app.uncensored {
-            (Style::default().fg(t::OVERLAY0), Style::default().fg(t::MAUVE).bold())
+            (Style::default().fg(t.overlay0), Style::default().fg(t.mauve).bold())
         } else {
-            (Style::default().fg(t::MAUVE).bold(), Style::default().fg(t::OVERLAY0))
+            (Style::default().fg(t.mauve).bold(), Style::default().fg(t.overlay0))
         };
         let line = Line::from(vec![
             Span::raw(" [Tab] "), Span::styled("有码", cs), Span::raw(" / "), Span::styled("无码", us),
@@ -652,22 +668,23 @@ fn draw_search_popup(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_config_popup(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme.clone();
     f.render_widget(Clear, area);
-    f.render_widget(Block::default().style(Style::default().bg(t::CRUST)), area);
+    f.render_widget(Block::default().style(Style::default().bg(t.crust)), area);
 
     let w = 48u16.min(area.width.saturating_sub(4));
-    let h = 14u16;
+    let h = 17u16;
     let popup = Rect::new((area.width - w) / 2, (area.height - h) / 2, w, h);
 
     let block = Block::bordered()
         .title(" ⚙️ 设置 (数字键切换 / Esc关闭) ")
-        .border_style(Style::default().fg(t::SAPPHIRE))
-        .style(Style::default().bg(t::BASE));
+        .border_style(Style::default().fg(t.sapphire))
+        .style(Style::default().bg(t.base));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
-    let on = Style::default().fg(t::GREEN).bold();
-    let off = Style::default().fg(t::RED);
+    let on = Style::default().fg(t.green).bold();
+    let off = Style::default().fg(t.red);
     let cfg = &app.config;
 
     let cache_dir = format!("{}/.jav/cache", std::env::var("HOME").unwrap_or_default());
@@ -681,57 +698,84 @@ fn draw_config_popup(f: &mut Frame, app: &App, area: Rect) {
     let lines = vec![
         Line::raw(""),
         Line::from(vec![
-            Span::styled(" 1", Style::default().fg(t::SAPPHIRE).bold()),
+            Span::styled(" 1", Style::default().fg(t.sapphire).bold()),
             Span::raw(". 列表显示图片  "),
             Span::styled(if cfg.show_thumbnails { "[开]" } else { "[关]" }, if cfg.show_thumbnails { on } else { off }),
         ]),
         Line::from(vec![
-            Span::styled(" 2", Style::default().fg(t::SAPPHIRE).bold()),
+            Span::styled(" 2", Style::default().fg(t.sapphire).bold()),
             Span::raw(". 详情显示封面  "),
             Span::styled(if cfg.show_cover { "[开]" } else { "[关]" }, if cfg.show_cover { on } else { off }),
         ]),
         Line::from(vec![
-            Span::styled(" 3", Style::default().fg(t::SAPPHIRE).bold()),
+            Span::styled(" 3", Style::default().fg(t.sapphire).bold()),
             Span::raw(". 优先字幕      "),
             Span::styled(if cfg.prefer_caption { "[开]" } else { "[关]" }, if cfg.prefer_caption { on } else { off }),
         ]),
         Line::from(vec![
-            Span::styled(" 4", Style::default().fg(t::SAPPHIRE).bold()),
+            Span::styled(" 4", Style::default().fg(t.sapphire).bold()),
             Span::raw(". 优先高清      "),
             Span::styled(if cfg.prefer_hd { "[开]" } else { "[关]" }, if cfg.prefer_hd { on } else { off }),
         ]),
         Line::from(vec![
-            Span::styled(" 5", Style::default().fg(t::SAPPHIRE).bold()),
+            Span::styled(" 5", Style::default().fg(t.sapphire).bold()),
             Span::raw(". 按大小排序    "),
             Span::styled(if cfg.sort_by_size { "[开]" } else { "[关]" }, if cfg.sort_by_size { on } else { off }),
         ]),
         Line::from(vec![
-            Span::styled(" 6", Style::default().fg(t::RED).bold()),
+            Span::styled(" 6", Style::default().fg(t.red).bold()),
             Span::raw(". 清理图片缓存  "),
-            Span::styled(format!("[{:.1}MB]", cache_mb), Style::default().fg(t::PEACH)),
+            Span::styled(format!("[{:.1}MB]", cache_mb), Style::default().fg(t.peach)),
+        ]),
+        Line::from(vec![
+            Span::styled(" 7", Style::default().fg(t.sapphire).bold()),
+            Span::raw(". 播放器        "),
+            Span::styled(
+                format!("[{}]", if cfg.player.is_empty() { "未设置" } else { &cfg.player }),
+                Style::default().fg(t.peach),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(" 8", Style::default().fg(t.sapphire).bold()),
+            Span::raw(". 主题          "),
+            Span::styled(format!("[{}]", cfg.theme_mode.label()), Style::default().fg(t.peach)),
         ]),
         Line::raw(""),
         Line::from(vec![
-            Span::styled(format!(" Kitty协议: {kitty_label}"), Style::default().fg(t::OVERLAY0)),
+            Span::styled(format!(" Kitty协议: {kitty_label}"), Style::default().fg(t.overlay0)),
             Span::raw(" | "),
-            Span::styled("~/.jav/", Style::default().fg(t::OVERLAY0)),
+            Span::styled("~/.jav/", Style::default().fg(t.overlay0)),
         ]),
     ];
     f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_qr_login_popup(f: &mut Frame, app: &mut App, area: Rect) {
-    let popup_w = 36u16.min(area.width.saturating_sub(4));
-    let popup_h = 22u16.min(area.height.saturating_sub(4));
-    let popup = Rect::new((area.width - popup_w) / 2, (area.height - popup_h) / 2, popup_w, popup_h);
+    let t = &app.theme.clone();
+    let font = app.picker.font_size();
 
-    f.render_widget(Clear, popup);
+    // calculate QR image size in terminal cells
+    // QR was resized to 24*font_h pixels square in App, figure out how many rows/cols that is
+    let qr_px = 24u16 * font.1;
+    let img_rows = qr_px / font.1;                  // ≈24
+    let img_cols = qr_px / font.0;                   // wider because font_w < font_h
+
+    // popup = border(2) + status(1) + image + hint(1)
+    let popup_h = (img_rows + 4).min(area.height.saturating_sub(2));
+    let popup_w = (img_cols + 4).min(area.width.saturating_sub(2));
+    let popup = Rect::new(
+        (area.width.saturating_sub(popup_w)) / 2,
+        (area.height.saturating_sub(popup_h)) / 2,
+        popup_w, popup_h,
+    );
+
+    clear_popup(f, popup, area);
 
     let cloud_status = if app.cloud115.is_some() { " [已登录]" } else { "" };
     let block = Block::bordered()
         .title(format!(" ☁️ 115{cloud_status} (Esc/r) "))
-        .border_style(Style::default().fg(t::TEAL))
-        .style(Style::default().bg(t::BASE));
+        .border_style(Style::default().fg(t.teal))
+        .style(Style::default().bg(t.base));
     let inner = block.inner(popup);
     f.render_widget(block, popup);
 
@@ -742,45 +786,81 @@ fn draw_qr_login_popup(f: &mut Frame, app: &mut App, area: Rect) {
     ]).split(inner);
 
     let status_style = if app.qr_status_text.contains("成功") {
-        Style::default().fg(t::GREEN).bold()
+        Style::default().fg(t.green).bold()
     } else if app.qr_status_text.contains("失败") || app.qr_status_text.contains("过期") {
-        Style::default().fg(t::RED)
+        Style::default().fg(t.red)
     } else {
-        Style::default().fg(t::YELLOW)
+        Style::default().fg(t.yellow)
     };
     f.render_widget(
         Paragraph::new(format!(" {}", app.qr_status_text)).style(status_style),
         rows[0],
     );
 
-    // QR image downloaded from 115 API, rendered via Kitty protocol
+    // QR image: pad 1 col each side so image doesn't touch border
+    let qr_area = Rect::new(
+        rows[1].x + 1,
+        rows[1].y,
+        rows[1].width.saturating_sub(2),
+        rows[1].height,
+    );
     if let Some(proto) = app.image_cache.get_mut("qr_115") {
         let img = StatefulImage::default().resize(Resize::Fit(None));
-        f.render_stateful_widget(img, rows[1], proto);
+        f.render_stateful_widget(img, qr_area, proto);
     } else {
         f.render_widget(
-            Paragraph::new("⏳ 加载二维码...").fg(t::OVERLAY0).alignment(Alignment::Center),
-            Rect::new(rows[1].x, rows[1].y + rows[1].height / 2, rows[1].width, 1),
+            Paragraph::new("⏳ 加载二维码...").fg(t.overlay0).alignment(Alignment::Center),
+            Rect::new(qr_area.x, qr_area.y + qr_area.height / 2, qr_area.width, 1),
         );
     }
 
     f.render_widget(
-        Paragraph::new(" 用 115 APP 扫码").fg(t::OVERLAY0).alignment(Alignment::Center),
+        Paragraph::new(" 用 115 APP 扫码").fg(t.overlay0).alignment(Alignment::Center),
         rows[2],
     );
 }
 
+fn draw_player_picker(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme.clone();
+    let item_count = app.player_options.len() as u16;
+    let w = 40u16.min(area.width.saturating_sub(4));
+    let h = (item_count + 4).min(area.height.saturating_sub(4));
+    let popup = Rect::new((area.width - w) / 2, (area.height - h) / 2, w, h);
+
+    clear_popup(f, popup, area);
+    let block = Block::bordered()
+        .title(" ▶️ 选择播放器 (Enter/Esc) ")
+        .border_style(Style::default().fg(t.teal))
+        .style(Style::default().bg(t.base));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let mut lines = vec![Line::raw("")];
+    for (i, &(_value, name)) in app.player_options.iter().enumerate() {
+        let selected = i == app.player_cursor;
+        let prefix = if selected { " ▸ " } else { "   " };
+        let style = if selected {
+            Style::default().fg(t.mauve).bold()
+        } else {
+            Style::default().fg(t.text)
+        };
+        lines.push(Line::styled(format!("{prefix}{name}"), style));
+    }
+    f.render_widget(Paragraph::new(lines), inner);
+}
+
 fn draw_download_popup(f: &mut Frame, app: &App, area: Rect) {
+    let t = &app.theme.clone();
     let w = 55u16.min(area.width.saturating_sub(4));
     let h = 7u16;
     let popup = Rect::new((area.width - w) / 2, (area.height - h) / 2, w, h);
 
     let block = Block::bordered()
         .title(" ☁️ 115 云下载 (Enter确认 / Esc取消) ")
-        .border_style(Style::default().fg(t::TEAL))
-        .style(Style::default().bg(t::BASE));
+        .border_style(Style::default().fg(t.teal))
+        .style(Style::default().bg(t.base));
     let inner = block.inner(popup);
-    f.render_widget(Clear, popup);
+    clear_popup(f, popup, area);
     f.render_widget(block, popup);
 
     let rows = Layout::vertical([
@@ -796,14 +876,14 @@ fn draw_download_popup(f: &mut Frame, app: &App, area: Rect) {
             .map(|m| format!("🎬 {}", m.number))
             .unwrap_or_default()
     };
-    f.render_widget(Paragraph::new(format!(" {info}")).fg(t::TEXT), rows[0]);
+    f.render_widget(Paragraph::new(format!(" {info}")).fg(t.text), rows[0]);
 
     f.render_widget(
-        Paragraph::new(" 下载目录ID (留空=默认目录):").fg(t::OVERLAY0),
+        Paragraph::new(" 下载目录ID (留空=默认目录):").fg(t.overlay0),
         rows[1],
     );
     f.render_widget(
-        Paragraph::new(format!(" {}▌", app.download_dir)).fg(t::TEXT).bold(),
+        Paragraph::new(format!(" {}▌", app.download_dir)).fg(t.text).bold(),
         rows[2],
     );
 }

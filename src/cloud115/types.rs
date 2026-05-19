@@ -156,3 +156,74 @@ pub struct AddTaskItem {
     pub state: bool,
     pub error_msg: Option<String>,
 }
+
+// --- 离线任务列表 ---
+
+#[derive(Debug, Deserialize)]
+pub struct TaskListResp {
+    #[serde(default)]
+    pub state: bool,
+    pub tasks: Option<Vec<OfflineTask>>,
+    pub count: Option<i32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OfflineTask {
+    pub info_hash: Option<String>,
+    pub name: Option<String>,
+    pub status: Option<i32>,
+    pub file_id: Option<String>,
+    pub percent: Option<f64>,
+    pub size: Option<i64>,
+    pub url: Option<String>,
+}
+
+// --- 文件列表 ---
+
+#[derive(Debug, Deserialize)]
+pub struct FilesResp {
+    #[serde(default)]
+    pub state: bool,
+    pub data: Option<Vec<FileInfo>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FileInfo {
+    pub fid: Option<String>,
+    #[serde(rename = "pc")]
+    pub pick_code: Option<String>,
+    #[serde(rename = "n")]
+    pub file_name: Option<String>,
+    #[serde(rename = "s", default, deserialize_with = "deserialize_size")]
+    pub size: Option<i64>,
+    pub ico: Option<String>,
+}
+
+fn deserialize_size<'de, D>(de: D) -> Result<Option<i64>, D::Error>
+where D: serde::Deserializer<'de> {
+    let v: Option<serde_json::Value> = Option::deserialize(de)?;
+    Ok(v.and_then(|v| match v {
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(s) => s.parse().ok(),
+        _ => None,
+    }))
+}
+
+// --- 文件搜索 ---
+
+#[derive(Debug, Deserialize)]
+pub struct SearchFilesResp {
+    #[serde(default)]
+    pub state: bool,
+    pub count: Option<i32>,
+    pub data: Option<Vec<FileInfo>>,
+}
+
+// --- 下载 URL ---
+
+#[derive(Debug, Deserialize)]
+pub struct DownloadUrlResp {
+    #[serde(default)]
+    pub state: bool,
+    pub data: Option<serde_json::Value>,
+}

@@ -82,6 +82,24 @@ impl Store {
         ).ok()
     }
 
+    pub fn get_by_number(&self, number: &str) -> Option<HistoryItem> {
+        self.conn.query_row(
+            "SELECT id,number,title,link,COALESCE(cover,''),COALESCE(tags,''),magnets,COALESCE(viewed_at,''),favorited FROM history WHERE number=?1",
+            [number],
+            |row| Ok(HistoryItem {
+                id: row.get(0)?,
+                number: row.get(1)?,
+                title: row.get(2)?,
+                link: row.get(3)?,
+                cover: row.get(4)?,
+                tags: row.get(5)?,
+                magnets: row.get(6)?,
+                viewed_at: row.get(7)?,
+                favorited: row.get::<_, i32>(8)? == 1,
+            }),
+        ).ok()
+    }
+
     pub fn toggle_favorite(&self, id: i64) -> Result<()> {
         self.conn.execute(
             "UPDATE history SET favorited = CASE WHEN favorited=1 THEN 0 ELSE 1 END WHERE id=?1",

@@ -28,3 +28,6 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 qrcode = "0.14.1"
 dirs = "6.0.0"
+arboard = "3"
+base64 = "0.22"
+terminal-light = "1"

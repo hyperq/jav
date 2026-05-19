@@ -48,6 +48,8 @@ pub enum AsyncMsg {
     Cloud115TaskResult(Result<String>),
     Cloud115BatchProgress(usize, usize), // (done, total) fetching magnets
     Cloud115BatchResult(Result<cloud115::BatchAddResult>),
+    Cloud115PlayProgress(String),
+    Cloud115PlayUrl(Result<(String, String)>), // (url, user_agent)
 }
 
 // --- Config ---
@@ -60,6 +62,8 @@ pub struct AppConfig {
     pub prefer_hd: bool,
     pub sort_by_size: bool,
     pub kitty_supported: bool,  // runtime: terminal supports Kitty graphics
+    pub player: String,         // "" (unset) | "system" | "mpv" | "iina" | "vlc"
+    pub theme_mode: super::theme::ThemeMode,
 }
 
 impl AppConfig {
@@ -70,7 +74,9 @@ impl AppConfig {
             prefer_caption: store.get_config_bool("prefer_caption", true),
             prefer_hd: store.get_config_bool("prefer_hd", true),
             sort_by_size: store.get_config_bool("sort_by_size", true),
-            kitty_supported: false, // set at runtime
+            kitty_supported: false,
+            player: store.get_config("player", ""),
+            theme_mode: super::theme::ThemeMode::from_str(&store.get_config("theme", "auto")),
         }
     }
 
@@ -80,6 +86,8 @@ impl AppConfig {
         store.set_config_bool("prefer_caption", self.prefer_caption);
         store.set_config_bool("prefer_hd", self.prefer_hd);
         store.set_config_bool("sort_by_size", self.sort_by_size);
+        store.set_config("player", &self.player);
+        store.set_config("theme", self.theme_mode.as_str());
     }
 
     pub fn images_enabled(&self) -> bool {
@@ -141,6 +149,8 @@ pub struct App {
     // config
     pub show_config: bool,
     pub config: AppConfig,
+    pub theme: super::theme::Theme,
+    pub detected_luma: Option<f32>,
 
     // images
     pub picker: Picker,
@@ -160,6 +170,11 @@ pub struct App {
     pub pending_batch_movies: Vec<Movie>,
     pub cloud_dl_progress: Option<(usize, usize)>, // batch progress (done, total)
 
+    // player picker
+    pub show_player_picker: bool,
+    pub player_options: Vec<(&'static str, &'static str)>, // (value, display_name)
+    pub player_cursor: usize,
+
     // ui state
     pub logs: Vec<String>,
     pub show_logs: bool,
@@ -167,22 +182,19 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(client: JavClient, store: Store) -> Self {
+    pub fn new(client: JavClient, store: Store, detected_luma: Option<f32>, detected_picker: Option<Picker>) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        // try to query terminal for font size, fallback to env or default
-        let mut picker = Picker::from_query_stdio()
-            .unwrap_or_else(|_| {
-                // allow override via JAV_FONT_SIZE="w,h" env
-                let fs = std::env::var("JAV_FONT_SIZE").ok()
-                    .and_then(|s| {
-                        let parts: Vec<&str> = s.split(',').collect();
-                        if parts.len() == 2 {
-                            Some((parts[0].trim().parse::<u16>().ok()?, parts[1].trim().parse::<u16>().ok()?))
-                        } else { None }
-                    })
-                    .unwrap_or((8, 16));
-                Picker::from_fontsize(fs)
-            });
+        let mut picker = detected_picker.unwrap_or_else(|| {
+            let fs = std::env::var("JAV_FONT_SIZE").ok()
+                .and_then(|s| {
+                    let parts: Vec<&str> = s.split(',').collect();
+                    if parts.len() == 2 {
+                        Some((parts[0].trim().parse::<u16>().ok()?, parts[1].trim().parse::<u16>().ok()?))
+                    } else { None }
+                })
+                .unwrap_or((8, 16));
+            Picker::from_fontsize(fs)
+        });
         let detected_proto = picker.protocol_type();
         let detected_font = picker.font_size();
 
@@ -242,6 +254,8 @@ impl App {
             selected_movies_cache: vec![],
             export_progress: None,
             show_config: false,
+            theme: super::theme::Theme::from_mode_with_luma(config.theme_mode, detected_luma),
+            detected_luma,
             config,
             picker,
             image_cache: HashMap::new(),
@@ -257,6 +271,10 @@ impl App {
             pending_magnets: vec![],
             pending_batch_movies: vec![],
             cloud_dl_progress: None,
+            show_player_picker: false,
+            player_options: platform_player_options(),
+            player_cursor: 0,
+
             logs: vec![],
             show_logs: false,
             toast: None,
@@ -376,12 +394,7 @@ impl App {
 
     pub fn log(&mut self, msg: String) {
         if self.logs.len() > 100 { self.logs.remove(0); }
-        self.logs.push(msg.clone());
-        // also write to file for debugging
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/jav-tui.log") {
-            let _ = writeln!(f, "{msg}");
-        }
+        self.logs.push(msg);
     }
 
     // --- Search ---
@@ -497,16 +510,14 @@ impl App {
         let url = url.to_string();
         let key = key.to_string();
         let tx = self.tx.clone();
+        let font = self.picker.font_size();
         tokio::spawn(async move {
-            // try disk cache first
             let cache_path = image_cache_path(&key);
             let img = if let Ok(bytes) = tokio::fs::read(&cache_path).await {
                 image::load_from_memory(&bytes).ok()
             } else {
-                // fetch from network and save to cache
                 match client.fetch_image_bytes(&url).await {
                     Ok(bytes) => {
-                        // save to disk cache
                         if let Some(dir) = std::path::Path::new(&cache_path).parent() {
                             let _ = tokio::fs::create_dir_all(dir).await;
                         }
@@ -516,7 +527,24 @@ impl App {
                     Err(_) => None,
                 }
             };
-            let _ = tx.send(AsyncMsg::ImageLoaded(key, img));
+            // resize in background thread to avoid blocking the event loop
+            let resized = img.map(|img| {
+                let (tw, th) = if key.starts_with("actress_") {
+                    let rows = 10u32;
+                    let cols = rows * font.1 as u32 / font.0 as u32;
+                    (cols * font.0 as u32, rows * font.1 as u32)
+                } else if key.starts_with("cover_") {
+                    let (term_w, _) = crossterm::terminal::size().unwrap_or((120, 40));
+                    let cols = (term_w as u32 * 55 / 100).saturating_sub(2);
+                    let tw = cols * font.0 as u32;
+                    let th = tw * img.height() / img.width().max(1);
+                    (tw, th)
+                } else {
+                    (18 * font.0 as u32, 12 * font.1 as u32)
+                };
+                img.resize(tw, th, image::imageops::FilterType::Triangle)
+            });
+            let _ = tx.send(AsyncMsg::ImageLoaded(key, resized));
         });
     }
 
@@ -548,6 +576,24 @@ impl App {
                     self.magnets.clear();
                     self.right_scroll = 0;
                     self.panel = Panel::Right;
+
+                    if let Some(cached) = self.store.get_cached_magnets(&m.number) {
+                        let parsed: Vec<Magnet> = cached.lines().filter_map(|line| {
+                            let parts: Vec<&str> = line.splitn(3, '|').collect();
+                            if parts.len() >= 3 {
+                                Some(Magnet {
+                                    link: parts[0].to_string(),
+                                    size: parts[1].to_string(),
+                                    caption: parts[2] == "1",
+                                })
+                            } else { None }
+                        }).collect();
+                        if !parsed.is_empty() {
+                            self.log(format!("📦 {} 缓存磁链: {}条", m.number, parsed.len()));
+                            self.magnets = parsed;
+                        }
+                    }
+
                     self.do_fetch_detail(&m);
                     self.do_fetch_magnets(&m);
                 }
@@ -610,16 +656,14 @@ impl App {
         };
 
         if let Some(m) = movie {
-            // ensure it's in history first
             let tags_str = m.tags.join(",");
-                    let _ = self.store.add_history(&m.number, &m.title, &m.link, &m.cover, &tags_str, "");
-            // toggle favorite
-            if let Ok(items) = self.store.get_history(200) {
-                if let Some(item) = items.iter().find(|i| i.number == m.number) {
-                    let _ = self.store.toggle_favorite(item.id);
-                    let status = if item.favorited { "取消收藏" } else { "已收藏" };
-                    self.log(format!("⭐ {}: {}", status, m.number));
-                }
+            let _ = self.store.add_history(&m.number, &m.title, &m.link, &m.cover, &tags_str, "");
+            if let Some(item) = self.store.get_by_number(&m.number) {
+                let _ = self.store.toggle_favorite(item.id);
+                let status = if item.favorited { "取消收藏" } else { "已收藏" };
+                self.log(format!("⭐ {}: {}", status, m.number));
+                self.load_history();
+                self.load_favorites();
             }
         }
     }
@@ -691,8 +735,16 @@ impl App {
         }
         let best = self.pick_best_magnet();
         if let Some(mag) = best {
-            self.log(format!("✅ 最佳磁链: {} [{}]", if mag.caption {"字幕"} else {""}, mag.size));
-            // TODO: copy to clipboard
+            let link = mag.link.clone();
+            let size = mag.size.clone();
+            let caption = mag.caption;
+            match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&link)) {
+                Ok(_) => self.show_toast(&format!("✅ 已复制: {}[{}]", if caption {"字幕 "} else {""}, size)),
+                Err(e) => {
+                    self.log(format!("⚠️ 剪贴板失败: {e}"));
+                    self.show_toast(&format!("⚠️ 复制失败: {}", truncate_magnet(&link)));
+                }
+            }
         }
     }
 
@@ -712,6 +764,63 @@ impl App {
     }
 
     // --- 115 cloud ---
+
+    pub fn play_from_115(&mut self) {
+        if self.cloud115.is_none() {
+            self.show_toast("⚠️ 未登录 115，按 L 扫码登录");
+            return;
+        }
+        if self.magnets.is_empty() {
+            self.show_toast("⚠️ 当前无磁力链接");
+            return;
+        }
+        // 未选择播放器 → 弹出选择框
+        if self.config.player.is_empty() {
+            self.show_player_picker = true;
+            self.player_cursor = 0;
+            return;
+        }
+        self.do_play_from_115();
+    }
+
+    pub fn do_play_from_115(&mut self) {
+        let magnet = self.pick_best_magnet().map(|m| m.link.clone());
+        if let Some(link) = magnet {
+            let info_hash = extract_info_hash(&link);
+            if info_hash.is_empty() {
+                self.show_toast("⚠️ 无法解析磁链 hash");
+                return;
+            }
+            let keyword = self.selected_movie.as_ref()
+                .map(|m| m.number.clone())
+                .unwrap_or_default();
+            self.show_toast("⏳ 正在查询 115 任务...");
+            let cookie = self.cloud115.as_ref().unwrap().cookie().clone();
+            let tx = self.tx.clone();
+            tokio::spawn(async move {
+                match Client115::new(cookie) {
+                    Ok(client) => {
+                        let tx_progress = tx.clone();
+                        let result = client.play_flow(&link, &info_hash, &keyword, |msg| {
+                            let _ = tx_progress.send(AsyncMsg::Cloud115PlayProgress(msg));
+                        }).await;
+                        let _ = tx.send(AsyncMsg::Cloud115PlayUrl(result));
+                    }
+                    Err(e) => { let _ = tx.send(AsyncMsg::Cloud115PlayUrl(Err(e))); }
+                }
+            });
+        }
+    }
+
+    pub fn confirm_player_selection(&mut self) {
+        if let Some(&(value, _)) = self.player_options.get(self.player_cursor) {
+            self.config.player = value.to_string();
+            self.config.save(&self.store);
+            self.show_player_picker = false;
+            self.log(format!("⚙️ 播放器设置为: {}", value));
+            self.do_play_from_115();
+        }
+    }
 
     pub fn fetch_115_quota(&self) {
         let cookie = match &self.cloud115 {
@@ -880,7 +989,10 @@ impl App {
     // --- Process async messages ---
 
     pub fn process_messages(&mut self) {
-        while let Ok(msg) = self.rx.try_recv() {
+        let mut budget = 5; // max messages per frame to keep UI responsive
+        while budget > 0 {
+            let Ok(msg) = self.rx.try_recv() else { break };
+            budget -= 1;
             match msg {
                 AsyncMsg::PageResult(Ok(r)) => {
                     self.log(format!("✅ 第{}页: {}条", r.page, r.movies.len()));
@@ -959,7 +1071,13 @@ impl App {
                 }
                 // 115 cloud messages
                 AsyncMsg::Cloud115QrImage(Some(img)) => {
-                    let proto = self.picker.new_resize_protocol(img);
+                    let font = self.picker.font_size();
+                    // resize QR to fill ~24 rows square area
+                    let qr_rows = 24u32;
+                    let target_h = qr_rows * font.1 as u32;
+                    let target_w = target_h; // square
+                    let resized = img.resize(target_w, target_h, image::imageops::FilterType::Nearest);
+                    let proto = self.picker.new_resize_protocol(resized);
                     self.image_cache.insert("qr_115".into(), proto);
                     self.qr_image_key = Some("qr_115".into());
                     self.qr_status_text = "请用 115 APP 扫码".into();
@@ -1028,36 +1146,24 @@ impl App {
                     self.show_toast(&format!("❌ 批量下载失败: {e}"));
                     self.log(format!("❌ 115 批量下载失败: {e}"));
                 }
+                AsyncMsg::Cloud115PlayProgress(msg) => {
+                    self.show_toast(&msg);
+                    self.log(msg);
+                }
+                AsyncMsg::Cloud115PlayUrl(Ok((url, ua))) => {
+                    self.log(format!("▶️ 播放URL: {}", truncate_magnet(&url)));
+                    let cookie = self.cloud115.as_ref().map(|c| c.cookie().to_header()).unwrap_or_default();
+                    match launch_player(&url, &self.config.player, &cookie, &ua) {
+                        Ok(_) => self.show_toast("▶️ 已打开播放器"),
+                        Err(e) => self.show_toast(&format!("❌ 启动播放器失败: {e}")),
+                    }
+                }
+                AsyncMsg::Cloud115PlayUrl(Err(e)) => {
+                    self.show_toast(&format!("❌ 获取播放链接失败: {e}"));
+                    self.log(format!("❌ 115 播放失败: {e}"));
+                }
                 AsyncMsg::ImageLoaded(key, Some(img)) => {
-                    self.log(format!("🖼️ loaded {}: {}x{}", key, img.width(), img.height()));
-                    let font = self.picker.font_size();
-                    // always resize to target pixel area (Retina needs explicit upscale)
-                    let resized = if key.starts_with("actress_") {
-                        // actress avatar: square, matching render area
-                        // render uses: avatar_h = cell_h - 2 = 10 rows
-                        // avatar_w = avatar_h * font_h / font_w (square in pixels)
-                        let avatar_h_rows = 10u32;
-                        let avatar_w_cols = avatar_h_rows * font.1 as u32 / font.0 as u32;
-                        let target_w = avatar_w_cols * font.0 as u32;
-                        let target_h = avatar_h_rows * font.1 as u32;
-                        img.resize(target_w, target_h, image::imageops::FilterType::Lanczos3)
-                    } else if key.starts_with("cover_") {
-                        // detail cover: 100% width of right panel
-                        let (term_w, _) = crossterm::terminal::size().unwrap_or((120, 40));
-                        let cols = (term_w as u32 * 55 / 100).saturating_sub(2);
-                        let target_w = cols * font.0 as u32;
-                        // scale to exact width, height follows aspect ratio
-                        let target_h = target_w * img.height() / img.width().max(1);
-                        img.resize_exact(target_w, target_h, image::imageops::FilterType::Lanczos3)
-                    } else {
-                        // thumbnail: fit within 18 cols × 12 rows
-                        let target_w = 18 * font.0 as u32;
-                        let target_h = 12 * font.1 as u32;
-                        img.resize(target_w, target_h, image::imageops::FilterType::Lanczos3)
-                    };
-                    self.log(format!("🖼️ resized {}: {}x{} → {}x{}",
-                        key, img.width(), img.height(), resized.width(), resized.height()));
-                    let proto = self.picker.new_resize_protocol(resized);
+                    let proto = self.picker.new_resize_protocol(img);
                     self.image_cache.insert(key.clone(), proto);
                     self.image_loading.remove(&key);
                 }
@@ -1079,6 +1185,123 @@ fn image_cache_path(key: &str) -> String {
     format!("{}/{safe_key}.bin", image_cache_dir())
 }
 
+fn platform_player_options() -> Vec<(&'static str, &'static str)> {
+    let mut opts = vec![];
+    #[cfg(target_os = "macos")]
+    {
+        opts.push(("iina", "IINA"));
+        opts.push(("mpv", "mpv"));
+        opts.push(("vlc", "VLC"));
+        opts.push(("system", "系统默认"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        opts.push(("mpv", "mpv"));
+        opts.push(("vlc", "VLC"));
+        opts.push(("system", "系统默认 (xdg-open)"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        opts.push(("potplayer", "PotPlayer"));
+        opts.push(("mpv", "mpv"));
+        opts.push(("vlc", "VLC"));
+        opts.push(("system", "系统默认"));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        opts.push(("mpv", "mpv"));
+        opts.push(("system", "系统默认"));
+    }
+    opts
+}
+
+fn truncate_magnet(s: &str) -> &str {
+    &s[..40.min(s.len())]
+}
+
+fn extract_info_hash(magnet: &str) -> String {
+    magnet.split("btih:")
+        .nth(1)
+        .and_then(|s| s.split('&').next())
+        .unwrap_or("")
+        .to_lowercase()
+}
+
+const MPV_SOCK: &str = "/tmp/jav-player.sock";
+
+fn quit_existing_player() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::net::UnixStream;
+        use std::io::Write;
+        if !std::path::Path::new(MPV_SOCK).exists() { return; }
+        if let Ok(mut stream) = UnixStream::connect(MPV_SOCK) {
+            stream.set_write_timeout(Some(std::time::Duration::from_secs(1))).ok();
+            let _ = writeln!(stream, r#"{{"command":["quit"]}}"#);
+            let _ = stream.flush();
+        }
+        // wait briefly for process to exit and release socket
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let _ = std::fs::remove_file(MPV_SOCK);
+    }
+}
+
+fn launch_player(url: &str, player: &str, cookie: &str, user_agent: &str) -> Result<()> {
+    use std::process::Command;
+    let cookie_header = format!("Cookie: {cookie}");
+    let ua_header = format!("User-Agent: {user_agent}");
+    let headers = format!("{cookie_header},{ua_header}");
+
+    // quit existing player so new one reuses the screen position
+    quit_existing_player();
+
+    let ipc_arg = format!("--input-ipc-server={MPV_SOCK}");
+    let hdr_arg = format!("--http-header-fields={headers}");
+
+    match player {
+        "mpv" => {
+            Command::new("mpv").arg(&ipc_arg).arg(&hdr_arg)
+                .arg("--").arg(url).spawn()?;
+        }
+        "iina" => {
+            #[cfg(target_os = "macos")]
+            {
+                let iina_ipc = format!("--mpv-input-ipc-server={MPV_SOCK}");
+                let iina_hdr = format!("--mpv-http-header-fields={headers}");
+                if Command::new("iina").arg(&iina_ipc).arg(&iina_hdr).arg(url).spawn().is_err() {
+                    Command::new("mpv").arg(&ipc_arg).arg(&hdr_arg)
+                        .arg("--").arg(url).spawn()?;
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Command::new("mpv").arg(&ipc_arg).arg(&hdr_arg)
+                    .arg("--").arg(url).spawn()?;
+            }
+        }
+        "vlc" => {
+            Command::new("vlc")
+                .arg(format!("--http-user-agent={user_agent}"))
+                .arg("--http-referrer=https://115.com/")
+                .arg("--").arg(url).spawn()?;
+        }
+        "potplayer" => {
+            #[cfg(target_os = "windows")]
+            { Command::new("PotPlayerMini64").arg(url).spawn()?; }
+            #[cfg(not(target_os = "windows"))]
+            {
+                Command::new("mpv").arg(&ipc_arg).arg(&hdr_arg)
+                    .arg("--").arg(url).spawn()?;
+            }
+        }
+        _ => {
+            Command::new("mpv").arg(&ipc_arg).arg(&hdr_arg)
+                .arg("--").arg(url).spawn()?;
+        }
+    }
+    Ok(())
+}
+
 fn parse_size_mb(s: &str) -> f64 {
     let s = s.trim();
     let num: f64 = s.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect::<String>().parse().unwrap_or(0.0);
@@ -1088,13 +1311,17 @@ fn parse_size_mb(s: &str) -> f64 {
 // --- Main loop ---
 
 pub async fn run(client: JavClient, store: Store) -> Result<()> {
+    // detect terminal capabilities before raw mode (OSC queries won't work in raw mode)
+    let detected_luma = terminal_light::luma().ok();
+    let detected_picker = Picker::from_query_stdio().ok();
+
     terminal::enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(client, store);
+    let mut app = App::new(client, store, detected_luma, detected_picker);
 
     loop {
         app.process_messages();
